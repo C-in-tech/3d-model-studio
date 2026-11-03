@@ -5,7 +5,7 @@ Generate a rigged, smooth mid-poly human male character as glTF 2.0 binary (GLB)
 - Y-up, meters, ~1.8 m tall, feet at y=0, character faces +Z, rest pose = T-pose.
 - Single skinned mesh with a Mixamo-compatible bone hierarchy (mixamorig: prefix),
   so Mixamo animations can be retargeted onto it.
-- Per-vertex skin weights via smooth distance falloff to bone segments (top 4).
+- Per-vertex skin weights via smooth gaussian falloff to bone segments (top 4).
 - Vertex colors tint hair, eyes and eyebrows; material base color is skin.
 
 Usage: python generate_human_model.py [output.glb]
@@ -18,9 +18,8 @@ import sys
 import numpy as np
 
 # ----------------------------------------------------------------------------
-# Skeleton definition
+# Skeleton definition: (name, parent, world position of the joint), parents first
 # ----------------------------------------------------------------------------
-# (name, parent, world position of the joint)
 BONES = [
     ("mixamorig:Hips",              None,                        (0.0, 0.95, 0.0)),
     ("mixamorig:Spine",             "mixamorig:Hips",            (0.0, 1.08, 0.0)),
@@ -55,22 +54,26 @@ BONES = [
     ("mixamorig:RightToeBase",      "mixamorig:RightFoot",       (-0.105, 0.05, 0.10)),
 ]
 
-# Bone influence segments: (bone, start point, end point, sigma)
-# Defaults: segment from the joint to its child joint (or a tip below it).
-CHILD_TIPS = {
-    "mixamorig:Hips": (0.0, 1.04, 0.0),
-    "mixamorig:Spine": None,
-    "mixamorig:Chest": None,
-    "mixamorig:Neck": None,
-    "mixamorig:Head": (0.0, 1.74, 0.0),
-    "mixamorig:LeftShoulder": None,
-    "mixamorig:RightShoulder": None,
-    "mixamorig:LeftHand": (0.845, 1.44, 0.0),
-    "mixamorig:RightHand": (-0.845, 1.44, 0.0),
-    "mixamorig:LeftFoot": (0.105, 0.05, 0.10),
-    "mixamorig:RightFoot": (-0.105, 0.05, 0.10),
-    "mixamorig:LeftToeBase": (0.105, 0.03, 0.18),
-    "mixamorig:RightToeBase": (-0.105, 0.03, 0.18),
+# Influence segment end points for bones whose segment must not default to a child.
+SEG_TIPS = {
+    "mixamorig:Hips":            (0.0, 1.03, 0.0),
+    "mixamorig:Head":            (0.0, 1.74, 0.0),
+    "mixamorig:LeftHand":        (0.845, 1.44, 0.0),
+    "mixamorig:RightHand":       (-0.845, 1.44, 0.0),
+    "mixamorig:LeftFoot":        (0.105, 0.05, 0.10),
+    "mixamorig:RightFoot":       (-0.105, 0.05, 0.10),
+    "mixamorig:LeftToeBase":     (0.105, 0.03, 0.18),
+    "mixamorig:RightToeBase":    (-0.105, 0.03, 0.18),
+    "mixamorig:LeftHandThumb1":  (0.86, 1.422, 0.052),
+    "mixamorig:RightHandThumb1": (-0.86, 1.422, 0.052),
+    "mixamorig:LeftHandIndex1":  (0.945, 1.456, 0.012),
+    "mixamorig:RightHandIndex1": (-0.945, 1.456, 0.012),
+    "mixamorig:LeftHandMiddle1": (0.950, 1.444, 0.004),
+    "mixamorig:RightHandMiddle1": (-0.950, 1.444, 0.004),
+    "mixamorig:LeftHandRing1":   (0.943, 1.432, -0.006),
+    "mixamorig:RightHandRing1":  (-0.943, 1.432, -0.006),
+    "mixamorig:LeftHandPinky1":  (0.923, 1.420, -0.016),
+    "mixamorig:RightHandPinky1": (-0.923, 1.420, -0.016),
 }
 SIGMAS = {
     "mixamorig:Hips": 0.105,
@@ -78,15 +81,27 @@ SIGMAS = {
     "mixamorig:Chest": 0.11,
     "mixamorig:Neck": 0.05,
     "mixamorig:Head": 0.085,
-    "mixamorig:LeftShoulder": 0.075,
-    "mixamorig:RightShoulder": 0.075,
+    "mixamorig:LeftShoulder": 0.06,
+    "mixamorig:RightShoulder": 0.06,
+    "mixamorig:LeftArm": 0.048,
+    "mixamorig:RightArm": 0.048,
+    "mixamorig:LeftHand": 0.035,
+    "mixamorig:RightHand": 0.035,
 }
+FINGER_SIGMA = 0.022
+DEFAULT_SIGMA = 0.05
+
+
+def sigma_for(name):
+    if "Hand" in name and name not in SIGMAS:  # finger bones
+        return FINGER_SIGMA
+    return SIGMAS.get(name, DEFAULT_SIGMA)
+
 
 # ----------------------------------------------------------------------------
 # Geometry helpers
 # ----------------------------------------------------------------------------
 def superellipse_ring(theta, rx, rz, expn):
-    """Superellipse cross-section points in a 2D plane (u, v)."""
     ct = np.cos(theta)
     st = np.sin(theta)
     u = np.sign(ct) * np.abs(ct) ** (2.0 / expn) * rx
@@ -95,25 +110,28 @@ def superellipse_ring(theta, rx, rz, expn):
 
 
 class MeshBuilder:
-    def __init__(self):
-        self.positions = []      # list of (x, y, z)
-        self.colors = []         # list of (r, g, b)
-        self.tris = []           # list of (i, j, k)
-        self._part_centroid = None
+    """Accumulates correctly-wound primitives with per-vertex colors."""
 
-    # -- raw primitive storage -------------------------------------------------
+    def __init__(self):
+        self.positions = []
+        self.colors = []
+        self.tris = []
+
     def _add(self, verts, tris, color):
         base = len(self.positions)
         self.positions.extend(verts)
         self.colors.extend([color] * len(verts))
         self.tris.extend((a + base, b + base, c + base) for a, b, c in tris)
+        return base, len(self.positions)
 
-    # -- loft along an axis ------------------------------------------------------
     def loft(self, axis, sections, color, theta_res=32, cap_start=True, cap_end=True):
-        """sections: list of (pos, c_off1, c_off2, rx, rz, expn).
-        For axis 'y': ring plane is (x, z), center offset (cx, cz).
-        For axis 'x': ring plane is (y, z), center offset (cy, cz).
-        For axis 'z': ring plane is (x, y), center offset (cx, cy).
+        """Loft superellipse cross-sections along an axis.
+
+        sections: (pos, c1, c2, rx, rz, expn)
+          axis 'y': ring plane (x, z), center offset (c1+u -> x, c2+v -> z)
+          axis 'x': ring plane (y, z)
+          axis 'z': ring plane (x, y)
+        Ring winding is CCW in the (u, v) plane; triangles (a, c, b) face outward.
         """
         verts = []
         for (pos, c1, c2, rx, rz, expn) in sections:
@@ -138,44 +156,24 @@ class MeshBuilder:
                 tris.append((b, c, d))
 
         def ring_center(r):
-            vs = verts[r * theta_res:(r + 1) * theta_res]
-            return np.mean(np.array(vs), axis=0)
+            return np.mean(np.array(verts[r * theta_res:(r + 1) * theta_res]), axis=0)
 
-        def cap(ring, front):
-            rc = ring_center(ring)
-            fan_start = None  # appended later
-            tris_local = []
-            for j in range(theta_res):
-                j2 = (j + 1) % theta_res
-                a = ring * theta_res + j
-                b = ring * theta_res + j2
-                tris_local.append((a, b))  # replaced by fan w/ apex
-            return rc, tris_local
-
-        # caps as fans around ring centers
         extra_verts = []
         extra_tris = []
         if cap_start:
-            rc, _ = cap(0, True)
             apex = len(verts) + len(extra_verts)
-            extra_verts.append(tuple(rc))
+            extra_verts.append(tuple(ring_center(0)))
             for j in range(theta_res):
-                j2 = (j + 1) % theta_res
-                extra_tris.append((apex, j, j2))
+                extra_tris.append((apex, j, (j + 1) % theta_res))
         if cap_end:
-            rc, _ = cap(n_rings - 1, False)
             apex = len(verts) + len(extra_verts)
-            extra_verts.append(tuple(rc))
+            extra_verts.append(tuple(ring_center(n_rings - 1)))
             ring0 = (n_rings - 1) * theta_res
             for j in range(theta_res):
-                j2 = (j + 1) % theta_res
-                extra_tris.append((apex, ring0 + j2, ring0 + j))
-        all_verts = verts + extra_verts
-        all_tris = tris + extra_tris
-        self._add(all_verts, all_tris, color)
+                extra_tris.append((apex, ring0 + (j + 1) % theta_res, ring0 + j))
+        return self._add(verts + extra_verts, tris + extra_tris, color)
 
-    # -- uv sphere -----------------------------------------------------------------
-    def sphere(self, center, radius, color, seg=16, rings=12, squash=1.0):
+    def sphere(self, center, radius, color, seg=14, rings=10, squash=1.0):
         verts = []
         for i in range(rings + 1):
             phi = math.pi * i / rings
@@ -192,148 +190,129 @@ class MeshBuilder:
                 b = i * seg + (j + 1) % seg
                 c = (i + 1) * seg + j
                 d = (i + 1) * seg + (j + 1) % seg
-                if i > 0:
-                    tris.append((a, c, b))
-                if i < rings - 1:
-                    tris.append((b, c, d))
-        self._add(verts, tris, color)
+                tris.append((a, b, c))
+                tris.append((b, d, c))
+        return self._add(verts, tris, color)
 
-    # -- finalize -------------------------------------------------------------------
     def finalize(self):
         pos = np.array(self.positions, dtype=np.float32)
         col = np.array(self.colors, dtype=np.float32)
         tris = np.array(self.tris, dtype=np.uint32)
-        # outward-facing winding: flip triangles whose normal points inward
-        p0 = pos[tris[:, 0]]
-        p1 = pos[tris[:, 1]]
-        p2 = pos[tris[:, 2]]
-        n = np.cross(p1 - p0, p2 - p0)
-        face_c = (p0 + p1 + p2) / 3.0
-        # part centroid = mesh center on the axis of the part is unknown here;
-        # use radial test against the nearest axis line via per-face local test:
-        # compare face normal against the direction from the mesh global center
-        center = pos.mean(axis=0)
-        inward = np.einsum("ij,ij->i", n, face_c - center) < 0
-        # heuristic fails for concave shells; instead test against each face's
-        # own vertex average direction from the closest body-part axis. Use a
-        # robust per-face rule: normal should point away from the nearest
-        # triangle-cluster center (the mesh is mostly convex-ish per part).
-        flip = inward
-        # recompute with flipped winding
-        tris2 = tris.copy()
-        tris2[flip] = tris2[flip][:, [0, 2, 1]]
-        tris = tris2
-        # smooth vertex normals
         nrm = np.zeros_like(pos)
-        p0 = pos[tris[:, 0]]
-        p1 = pos[tris[:, 1]]
-        p2 = pos[tris[:, 2]]
+        p0, p1, p2 = pos[tris[:, 0]], pos[tris[:, 1]], pos[tris[:, 2]]
         fn = np.cross(p1 - p0, p2 - p0)
         for k in range(3):
             np.add.at(nrm, tris[:, k], fn)
         ln = np.linalg.norm(nrm, axis=1, keepdims=True)
         ln[ln == 0] = 1.0
-        nrm = nrm / ln
-        return pos.astype(np.float32), nrm.astype(np.float32), col.astype(np.float32), tris
+        nrm = (nrm / ln).astype(np.float32)
+        return pos, nrm, col, tris
+
+
+SKIN = (1.0, 1.0, 1.0)          # tinted by the material base color
+DARK = (0.09, 0.062, 0.048)     # hair / brows
+EYE = (0.05, 0.055, 0.07)
 
 
 def build_body(mb: MeshBuilder):
-    SKIN = (1.0, 1.0, 1.0)          # tinted by material base color
-    DARK = (0.10, 0.07, 0.055)      # hair / brows
-    EYE = (0.04, 0.045, 0.06)
-
-    # ---- torso (axis y) ----
-    torso_secs = [
-        (0.895, 0.0, -0.005, 0.155, 0.108, 2.2),   # pelvis
+    # ---- torso ----
+    mb.loft("y", [
+        (0.895, 0.0, -0.005, 0.155, 0.108, 2.2),
         (0.955, 0.0, -0.004, 0.168, 0.112, 2.2),
-        (1.045, 0.0, 0.0, 0.160, 0.113, 2.4),      # waist
+        (1.045, 0.0, 0.0, 0.160, 0.113, 2.4),
         (1.150, 0.0, 0.004, 0.172, 0.120, 2.3),
-        (1.270, 0.0, 0.010, 0.192, 0.128, 2.1),    # chest
+        (1.270, 0.0, 0.010, 0.192, 0.128, 2.1),
         (1.380, 0.0, 0.010, 0.180, 0.118, 2.1),
-        (1.455, 0.0, 0.006, 0.128, 0.096, 2.0),    # shoulder line
-    ]
-    mb.loft("y", torso_secs, SKIN, theta_res=48)
+        (1.455, 0.0, 0.006, 0.128, 0.096, 2.0),
+    ], SKIN, theta_res=48)
 
     # ---- neck ----
     mb.loft("y", [
         (1.435, 0.0, 0.002, 0.054, 0.056, 2.0),
-        (1.530, 0.0, 0.004, 0.052, 0.055, 2.0),
-    ], SKIN, theta_res=32, cap_start=True, cap_end=False)
+        (1.532, 0.0, 0.004, 0.052, 0.055, 2.0),
+    ], SKIN, theta_res=32, cap_end=False)
 
     # ---- head ----
     head_secs = [
         (1.515, 0.0, 0.004, 0.058, 0.060, 2.0),
-        (1.550, 0.0, 0.008, 0.076, 0.086, 2.2),    # jaw
-        (1.600, 0.0, 0.012, 0.092, 0.100, 2.4),    # cheeks
-        (1.660, 0.0, 0.014, 0.096, 0.106, 2.6),    # brow line
-        (1.700, 0.0, 0.010, 0.090, 0.100, 2.6),    # forehead
+        (1.550, 0.0, 0.008, 0.076, 0.086, 2.2),
+        (1.600, 0.0, 0.012, 0.092, 0.100, 2.4),
+        (1.660, 0.0, 0.014, 0.096, 0.106, 2.6),
+        (1.700, 0.0, 0.010, 0.090, 0.100, 2.6),
         (1.740, 0.0, 0.0, 0.074, 0.084, 2.4),
-        (1.772, 0.0, -0.008, 0.048, 0.058, 2.2),   # crown
+        (1.772, 0.0, -0.008, 0.048, 0.058, 2.2),
     ]
-    mb.loft("y", head_secs, SKIN, theta_res=48)
+    mb.loft("y", head_secs, SKIN, theta_res=48, cap_start=False, cap_end=False)
 
     # ---- nose ----
     mb.loft("z", [
-        (0.096, 0.0, 1.652, 0.022, 0.020, 2.0),
-        (0.112, 0.0, 1.648, 0.018, 0.016, 2.0),
-        (0.120, 0.0, 1.644, 0.014, 0.012, 2.0),
+        (0.098, 0.0, 1.650, 0.024, 0.022, 2.0),
+        (0.116, 0.0, 1.646, 0.019, 0.017, 2.0),
+        (0.126, 0.0, 1.642, 0.014, 0.012, 2.0),
     ], SKIN, theta_res=16)
 
     # ---- ears ----
     for sx in (1, -1):
         mb.loft("x", [
             (0.088 * sx, 1.660, 0.0, 0.016, 0.024, 2.0),
-            (0.102 * sx, 1.660, -0.004, 0.012, 0.020, 2.0),
+            (0.104 * sx, 1.660, -0.004, 0.011, 0.019, 2.0),
         ], SKIN, theta_res=12)
 
-    # ---- hair cap (dark shell over the skull) ----
+    # ---- hair: shell over the skull, hairline pulled back over the face ----
     hair_secs = []
     for (pos, cx, cz, rx, rz, expn) in head_secs:
-        if pos < 1.560:
+        if pos < 1.585:
             continue
-        hair_secs.append((pos, cx, cz + 0.004, rx * 1.045, rz * 1.045, expn))
-    # drop the fringe line down the back of the head
-    hair_secs.insert(0, (1.545, 0.0, -0.030, 0.080, 0.070, 2.2))
-    mb.loft("y", hair_secs, DARK, theta_res=48)
+        hair_secs.append((pos, cx, cz + 0.004, rx * 1.05, rz * 1.05, expn))
+    hair_start, hair_end = mb.loft("y", hair_secs, DARK, theta_res=48,
+                                   cap_start=False, cap_end=True)
+    hp = np.array(mb.positions, dtype=object)
+    for i in range(hair_start, hair_end):
+        x, y, z = mb.positions[i]
+        if z > 0.0 and y < 1.72:
+            # front hairline: pull flush with the head surface, sloped
+            t = max(0.0, min(1.0, (1.72 - y) / 0.135))
+            pull = 1.05 - 0.042 * t
+            mb.positions[i] = (x * pull, y, z * pull)
+    for i in range(hair_start, hair_end):
+        x, y, z = mb.positions[i]
+        if z < -0.02 and y < 1.60:
+            # nape line
+            mb.positions[i] = (x * 1.02, y, z * 1.02)
 
     # ---- eyes + brows ----
     for sx in (1, -1):
-        mb.sphere((0.034 * sx, 1.660, 0.088), 0.0145, EYE, seg=14, rings=10, squash=0.9)
-        mb.loft("z", [
-            (0.098, 0.0, 1.692, 0.024 * sx, 0.007, 2.0),
-        ], DARK, theta_res=8)
+        mb.sphere((0.034 * sx, 1.660, 0.093), 0.0145, EYE, squash=0.9)
+        mb.loft("z", [(0.100, 0.0, 1.694, 0.024 * sx, 0.007, 2.0)], DARK, theta_res=8)
 
     # ---- arms (T-pose along X) ----
-    def arm(sx, mirror_z=1.0):
+    def arm(sx):
         x = lambda v: v * sx
         mb.loft("x", [
-            (x(0.150), 1.440, 0.004, 0.064, 0.064, 2.0),   # inside torso
-            (x(0.200), 1.440, 0.004, 0.056, 0.058, 2.0),   # deltoid
+            (x(0.150), 1.440, 0.004, 0.064, 0.064, 2.0),
+            (x(0.200), 1.440, 0.004, 0.056, 0.058, 2.0),
             (x(0.310), 1.440, 0.001, 0.049, 0.052, 2.0),
-            (x(0.460), 1.438, -0.001, 0.045, 0.048, 2.0),  # elbow
+            (x(0.460), 1.438, -0.001, 0.045, 0.048, 2.0),
             (x(0.600), 1.438, -0.002, 0.038, 0.041, 2.0),
-            (x(0.720), 1.438, -0.002, 0.034, 0.036, 2.0),  # wrist
+            (x(0.720), 1.438, -0.002, 0.034, 0.036, 2.0),
         ], SKIN, theta_res=24)
-        # palm
         mb.loft("x", [
             (x(0.725), 1.438, -0.002, 0.036, 0.026, 2.2),
             (x(0.790), 1.440, -0.002, 0.034, 0.024, 2.2),
-            (x(0.855), 1.440, -0.002, 0.030, 0.022, 2.2),  # knuckles
+            (x(0.855), 1.440, -0.002, 0.030, 0.022, 2.2),
         ], SKIN, theta_res=16)
-        # fingers
         fingers = [
-            ("index", 1.458, 0.010, 0.095, 0.0105),
-            ("middle", 1.446, 0.002, 0.100, 0.0110),
-            ("ring", 1.434, -0.006, 0.093, 0.0100),
-            ("pinky", 1.422, -0.016, 0.078, 0.0090),
+            (1.458, 0.010, 0.095, 0.0105),
+            (1.446, 0.002, 0.100, 0.0110),
+            (1.434, -0.006, 0.093, 0.0100),
+            (1.422, -0.016, 0.078, 0.0090),
         ]
-        for _, fy, fz, tip, r in fingers:
+        for fy, fz, tip, r in fingers:
             mb.loft("x", [
                 (x(0.850), fy, fz, r, r, 2.0),
                 (x(0.850 + (tip - 0.85) * 0.55), fy - 0.001, fz, r * 0.85, r * 0.85, 2.0),
                 (x(tip), fy - 0.002, fz, r * 0.62, r * 0.62, 2.0),
             ], SKIN, theta_res=10)
-        # thumb
         mb.loft("x", [
             (x(0.770), 1.430, 0.024, 0.014, 0.014, 2.0),
             (x(0.815), 1.426, 0.038, 0.0125, 0.0125, 2.0),
@@ -347,21 +326,20 @@ def build_body(mb: MeshBuilder):
     def leg(sx):
         x = lambda v: v * sx
         mb.loft("y", [
-            (0.960, x(0.095), 0.0, 0.084, 0.086, 2.2),    # inside pelvis
-            (0.880, x(0.098), 0.0, 0.079, 0.083, 2.2),    # thigh top
+            (0.960, x(0.095), 0.0, 0.084, 0.086, 2.2),
+            (0.880, x(0.098), 0.0, 0.079, 0.083, 2.2),
             (0.700, x(0.104), 0.001, 0.067, 0.072, 2.2),
-            (0.480, x(0.106), 0.006, 0.056, 0.060, 2.2),  # knee
-            (0.330, x(0.105), 0.010, 0.049, 0.052, 2.2),  # calf
+            (0.480, x(0.106), 0.006, 0.056, 0.060, 2.2),
+            (0.330, x(0.105), 0.010, 0.049, 0.052, 2.2),
             (0.170, x(0.105), 0.003, 0.039, 0.043, 2.2),
-            (0.085, x(0.105), -0.002, 0.032, 0.036, 2.2), # ankle
+            (0.085, x(0.105), -0.002, 0.032, 0.036, 2.2),
         ], SKIN, theta_res=28)
-        # foot
         mb.loft("z", [
-            (-0.078, x(0.105), 0.048, 0.042, 0.048, 2.4),  # heel
+            (-0.078, x(0.105), 0.048, 0.042, 0.048, 2.4),
             (-0.020, x(0.105), 0.038, 0.046, 0.038, 2.4),
             (0.050, x(0.104), 0.034, 0.048, 0.034, 2.4),
             (0.120, x(0.104), 0.030, 0.043, 0.030, 2.4),
-            (0.170, x(0.103), 0.024, 0.030, 0.024, 2.4),   # toe
+            (0.170, x(0.103), 0.024, 0.030, 0.024, 2.4),
         ], SKIN, theta_res=20)
 
     leg(+1)
@@ -375,47 +353,36 @@ def bone_segments():
     by_name = {n: np.array(p) for n, _, p in BONES}
     segs = []
     for name, parent, pos in BONES:
-        tip = CHILD_TIPS.get(name)
-        if tip is not None:
-            segs.append((name, np.array(pos), np.array(tip)))
-        elif parent is not None:
-            # segment to the first child joint, else to parent
-            children = [c for c, par, _ in BONES if par == name]
-            if children:
-                segs.append((name, np.array(pos), by_name[children[0]]))
-            else:
-                segs.append((name, np.array(pos), by_name[parent]))
-        # Hips handled by explicit tip; head uses explicit tip.
-    # shoulders: short segments from clavicle joint outward
-    segs.append(("mixamorig:LeftShoulder", np.array((0.055, 1.425, 0.0)), np.array((0.185, 1.44, 0.005))))
-    segs.append(("mixamorig:RightShoulder", np.array((-0.055, 1.425, 0.0)), np.array((-0.185, 1.44, 0.005))))
+        start = np.array(pos)
+        if name in SEG_TIPS:
+            end = np.array(SEG_TIPS[name])
+        else:
+            children = [by_name[c] for c, par, _ in BONES if par == name]
+            end = children[0] if children else by_name[parent]
+        segs.append((name, start, end))
     return segs
 
 
 def seg_dist(points, a, b):
-    """Distance from each point to segment a-b."""
     ab = b - a
     denom = float(ab @ ab)
     if denom < 1e-12:
         return np.linalg.norm(points - a, axis=1)
-    t = ((points - a) @ ab) / denom
-    t = np.clip(t, 0.0, 1.0)
+    t = np.clip(((points - a) @ ab) / denom, 0.0, 1.0)
     proj = a + t[:, None] * ab
     return np.linalg.norm(points - proj, axis=1)
 
 
 def compute_weights(positions, segs, joints_index):
     n = len(positions)
-    weights = np.zeros((n, len(segs)), dtype=np.float64)
-    sig = np.array([SIGMAS.get(name, 0.052) for name, _, _ in segs])
+    weights = np.zeros((n, len(segs)))
+    sigs = np.array([sigma_for(name) for name, _, _ in segs])
     for bi, (name, a, b) in enumerate(segs):
         d = seg_dist(positions, a, b)
-        weights[:, bi] = np.exp(-((d / sig[bi]) ** 2))
-    # zero out negligible
+        weights[:, bi] = np.exp(-((d / sigs[bi]) ** 2))
     weights[weights < 1e-4] = 0.0
-    # keep top 4
     top4 = np.argsort(weights, axis=1)[:, -4:]
-    w4 = np.zeros((n, 4), dtype=np.float64)
+    w4 = np.zeros((n, 4))
     j4 = np.zeros((n, 4), dtype=np.int64)
     for i in range(n):
         for k, bi in enumerate(top4[i]):
@@ -430,47 +397,33 @@ def compute_weights(positions, segs, joints_index):
 # ----------------------------------------------------------------------------
 # glTF assembly
 # ----------------------------------------------------------------------------
-def look_at_forward(a, b):
-    """Not used: rest pose has identity rotations."""
-    return np.eye(4)
-
-
 def write_glb(path, positions, normals, colors, indices, joints, weights,
               bone_defs, ibms):
-    # --- pack buffer ---
-    def align(buf, pad=4):
-        while len(buf) % pad:
-            buf += b"\x00"
-        return buf
+    buffer_bytes = bytearray()
 
-    blobs = []
-    accessors = []
     buffer_views = []
+    accessors = []
 
     def add_view(data, target=None):
-        buf = blobs[0] if blobs else b""
-        offset = len(buf)
-        blobs[0] = buf + data
-        # align for the next view
-        blobs[0] = align(blobs[0])
+        offset = len(buffer_bytes)
+        buffer_bytes.extend(data)
+        while len(buffer_bytes) % 4:
+            buffer_bytes += b"\x00"
         bv = {"buffer": 0, "byteOffset": offset, "byteLength": len(data)}
         if target:
             bv["target"] = target
         buffer_views.append(bv)
         return len(buffer_views) - 1
 
-    blobs.append(b"")
     # indices
-    idx_data = indices.astype("<u4").tobytes()
-    iv = add_view(idx_data, 34963)
+    iv = add_view(indices.astype("<u4").tobytes(), 34963)
     accessors.append({
         "bufferView": iv, "componentType": 5125, "count": len(indices),
         "type": "SCALAR", "min": [int(indices.min())], "max": [int(indices.max())],
     })
     idx_acc = len(accessors) - 1
     # positions
-    pos_data = positions.astype("<f4").tobytes()
-    pv = add_view(pos_data, 34962)
+    pv = add_view(positions.astype("<f4").tobytes(), 34962)
     accessors.append({
         "bufferView": pv, "componentType": 5126, "count": len(positions),
         "type": "VEC3",
@@ -481,7 +434,7 @@ def write_glb(path, positions, normals, colors, indices, joints, weights,
     nv = add_view(normals.astype("<f4").tobytes(), 34962)
     accessors.append({"bufferView": nv, "componentType": 5126, "count": len(normals), "type": "VEC3"})
     nrm_acc = len(accessors) - 1
-    # colors
+    # vertex colors
     cv = add_view(colors.astype("<f4").tobytes(), 34962)
     accessors.append({"bufferView": cv, "componentType": 5126, "count": len(colors), "type": "VEC3"})
     col_acc = len(accessors) - 1
@@ -499,72 +452,58 @@ def write_glb(path, positions, normals, colors, indices, joints, weights,
     accessors.append({"bufferView": ibv, "componentType": 5126, "count": len(ibms), "type": "MAT4"})
     ibm_acc = len(accessors) - 1
 
-    buffer_bytes = blobs[0]
-
-    # --- nodes ---
+    # joint nodes, parents first
     nodes = []
     name_to_node = {}
-    # joint nodes in hierarchical order (parents before children in BONES)
     joint_order = [n for n, _, _ in bone_defs]
     for name, parent, pos in bone_defs:
-        node = {"name": name, "translation": [float(c) for c in pos], "rotation": [0, 0, 0, 1]}
-        idx = len(nodes)
-        node_idx = idx
-        nodes.append(node)
+        node_idx = len(nodes)
+        nodes.append({
+            "name": name,
+            "translation": [float(c) for c in pos],
+            "rotation": [0, 0, 0, 1],
+        })
         name_to_node[name] = node_idx
         if parent:
             nodes[name_to_node[parent]].setdefault("children", []).append(node_idx)
     joints_list = [name_to_node[n] for n in joint_order]
 
-    mesh_node = {
-        "name": "HumanMale",
-        "mesh": 0,
-        "skin": 0,
-    }
     mesh_node_idx = len(nodes)
-    nodes.append(mesh_node)
+    nodes.append({"name": "HumanMale", "mesh": 0, "skin": 0})
 
-    skins = [{
-        "joints": joints_list,
-        "inverseBindMatrices": ibm_acc,
-        "skeleton": joints_list[0],
-    }]
-
-    meshes = [{
-        "name": "HumanMale",
-        "primitives": [{
-            "attributes": {
-                "POSITION": pos_acc,
-                "NORMAL": nrm_acc,
-                "COLOR_0": col_acc,
-                "JOINTS_0": jnt_acc,
-                "WEIGHTS_0": wgt_acc,
-            },
-            "indices": idx_acc,
-            "material": 0,
-            "mode": 4,
-        }],
-    }]
-
-    materials = [{
-        "name": "Skin",
-        "pbrMetallicRoughness": {
-            "baseColorFactor": [0.845, 0.640, 0.535, 1.0],
-            "metallicFactor": 0.0,
-            "roughnessFactor": 0.75,
-        },
-        "doubleSided": False,
-    }]
-
-    scene_nodes = [mesh_node_idx, joints_list[0]]
     gltf = {
         "asset": {"version": "2.0", "generator": "lovable-procedural-human"},
         "scene": 0,
-        "scenes": [{"nodes": scene_nodes, "name": "Scene"}],
+        "scenes": [{"nodes": [mesh_node_idx, joints_list[0]], "name": "Scene"}],
         "nodes": nodes,
-        "meshes": meshes,
-        "skins": skins,
-        "materials": materials,
+        "meshes": [{
+            "name": "HumanMale",
+            "primitives": [{
+                "attributes": {
+                    "POSITION": pos_acc,
+                    "NORMAL": nrm_acc,
+                    "COLOR_0": col_acc,
+                    "JOINTS_0": jnt_acc,
+                    "WEIGHTS_0": wgt_acc,
+                },
+                "indices": idx_acc,
+                "material": 0,
+                "mode": 4,
+            }],
+        }],
+        "skins": [{
+            "joints": joints_list,
+            "inverseBindMatrices": ibm_acc,
+            "skeleton": joints_list[0],
+        }],
+        "materials": [{
+            "name": "Skin",
+            "pbrMetallicRoughness": {
+                "baseColorFactor": [0.845, 0.640, 0.535, 1.0],
+                "metallicFactor": 0.0,
+                "roughnessFactor": 0.75,
+            },
+        }],
         "accessors": accessors,
         "bufferViews": buffer_views,
         "buffers": [{"byteLength": len(buffer_bytes)}],
@@ -583,7 +522,8 @@ def write_glb(path, positions, normals, colors, indices, joints, weights,
         f.write(json_bytes)
         f.write(struct.pack("<II", len(buffer_bytes), 0x004E4942))
         f.write(buffer_bytes)
-    print(f"wrote {path}: {len(positions)} verts, {len(indices)//3} tris, {len(bone_defs)} bones, {total} bytes")
+    print(f"wrote {path}: {len(positions)} verts, {len(indices) // 3} tris, "
+          f"{len(bone_defs)} bones, {total // 1024} KB")
 
 
 def main():
@@ -592,21 +532,16 @@ def main():
     build_body(mb)
     positions, normals, colors, tris = mb.finalize()
 
-    # order joints: parents first (BONES already ordered)
     bone_defs = [(n, p, np.array(pos)) for n, p, pos in BONES]
     joints_index = {name: i for i, (name, _, _) in enumerate(bone_defs)}
 
     segs = bone_segments()
     joints4, weights4 = compute_weights(positions, segs, joints_index)
 
-    # inverse bind matrices: world transform of each joint in rest pose
     world = {}
     ibms = []
     for name, parent, pos in bone_defs:
-        if parent:
-            M = world[parent].copy()
-        else:
-            M = np.eye(4)
+        M = world[parent].copy() if parent else np.eye(4)
         T = np.eye(4)
         T[:3, 3] = pos
         M = M @ T
