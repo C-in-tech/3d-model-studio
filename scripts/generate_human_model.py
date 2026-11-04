@@ -408,7 +408,7 @@ def write_glb(path, positions, normals, colors, indices, joints, weights,
         offset = len(buffer_bytes)
         buffer_bytes.extend(data)
         while len(buffer_bytes) % 4:
-            buffer_bytes += b"\x00"
+            buffer_bytes.extend(b"\x00")
         bv = {"buffer": 0, "byteOffset": offset, "byteLength": len(data)}
         if target:
             bv["target"] = target
