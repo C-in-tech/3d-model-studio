@@ -70,10 +70,10 @@ SEG_TIPS = {
     "mixamorig:RightHandIndex1": (-0.945, 1.456, 0.012),
     "mixamorig:LeftHandMiddle1": (0.950, 1.444, 0.004),
     "mixamorig:RightHandMiddle1": (-0.950, 1.444, 0.004),
-    "mixamorig:LeftHandRing1":   (0.943, 1.432, -0.006),
-    "mixamorig:RightHandRing1":  (-0.943, 1.432, -0.006),
-    "mixamorig:LeftHandPinky1":  (0.923, 1.420, -0.016),
-    "mixamorig:RightHandPinky1": (-0.923, 1.420, -0.016),
+    "mixamorig:LeftHandRing1":   (0.930, 1.432, -0.006),
+    "mixamorig:RightHandRing1":  (-0.930, 1.432, -0.006),
+    "mixamorig:LeftHandPinky1":  (0.912, 1.420, -0.016),
+    "mixamorig:RightHandPinky1": (-0.912, 1.420, -0.016),
 }
 SIGMAS = {
     "mixamorig:Hips": 0.105,
@@ -302,10 +302,10 @@ def build_body(mb: MeshBuilder):
             (x(0.855), 1.440, -0.002, 0.030, 0.022, 2.2),
         ], SKIN, theta_res=16)
         fingers = [
-            (1.458, 0.010, 0.095, 0.0105),
-            (1.446, 0.002, 0.100, 0.0110),
-            (1.434, -0.006, 0.093, 0.0100),
-            (1.422, -0.016, 0.078, 0.0090),
+            (1.458, 0.010, 0.940, 0.0105),
+            (1.446, 0.002, 0.950, 0.0110),
+            (1.434, -0.006, 0.930, 0.0100),
+            (1.422, -0.016, 0.912, 0.0090),
         ]
         for fy, fz, tip, r in fingers:
             mb.loft("x", [
@@ -408,7 +408,7 @@ def write_glb(path, positions, normals, colors, indices, joints, weights,
         offset = len(buffer_bytes)
         buffer_bytes.extend(data)
         while len(buffer_bytes) % 4:
-            buffer_bytes += b"\x00"
+            buffer_bytes.extend(b"\x00")
         bv = {"buffer": 0, "byteOffset": offset, "byteLength": len(data)}
         if target:
             bv["target"] = target
