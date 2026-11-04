@@ -36,7 +36,7 @@ export const CONTROLS: Control[] = [
   {
     id: "neckNod", label: "Neck nod", group: "Head & Neck",
     min: -30, max: 30, default: 0,
-    targets: [{ bone: `${L}ForeArm`.replace("ForeArm", "Neck"), axis: "x", sign: 1 }],
+    targets: [{ bone: "mixamorig:Neck", axis: "x", sign: 1 }],
   },
   {
     id: "neckTurn", label: "Neck turn", group: "Head & Neck",
@@ -271,6 +271,17 @@ export function getBonesVisible(): boolean {
 
 export function setBonesVisible(v: boolean) {
   bonesVisible = v;
+  listeners.forEach((fn) => fn());
+}
+
+let turntable = false;
+
+export function getTurntable(): boolean {
+  return turntable;
+}
+
+export function setTurntable(v: boolean) {
+  turntable = v;
   listeners.forEach((fn) => fn());
 }
 
