@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { useMemo, useRef, useSyncExternalStore, useState } from "react";
 import * as THREE from "three";
 import { Canvas, useFrame } from "@react-three/fiber";
 import {
@@ -85,13 +85,6 @@ function RigHelpers({ bones }: { bones: THREE.Bone[] }) {
     () => new Float32Array(Math.max(0, bones.length - 1) * 6),
     [bones.length],
   );
-
-  useEffect(() => {
-    const geo = lineRef.current?.geometry as THREE.BufferGeometry | undefined;
-    if (geo && !geo.getAttribute("position")) {
-      geo.setAttribute("position", new THREE.BufferAttribute(linePositions, 3));
-    }
-  }, [linePositions]);
 
   const tmp = useMemo(() => new THREE.Vector3(), []);
   const tmpMat = useMemo(() => new THREE.Matrix4(), []);
