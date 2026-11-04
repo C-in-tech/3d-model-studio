@@ -70,10 +70,10 @@ SEG_TIPS = {
     "mixamorig:RightHandIndex1": (-0.945, 1.456, 0.012),
     "mixamorig:LeftHandMiddle1": (0.950, 1.444, 0.004),
     "mixamorig:RightHandMiddle1": (-0.950, 1.444, 0.004),
-    "mixamorig:LeftHandRing1":   (0.943, 1.432, -0.006),
-    "mixamorig:RightHandRing1":  (-0.943, 1.432, -0.006),
-    "mixamorig:LeftHandPinky1":  (0.923, 1.420, -0.016),
-    "mixamorig:RightHandPinky1": (-0.923, 1.420, -0.016),
+    "mixamorig:LeftHandRing1":   (0.930, 1.432, -0.006),
+    "mixamorig:RightHandRing1":  (-0.930, 1.432, -0.006),
+    "mixamorig:LeftHandPinky1":  (0.912, 1.420, -0.016),
+    "mixamorig:RightHandPinky1": (-0.912, 1.420, -0.016),
 }
 SIGMAS = {
     "mixamorig:Hips": 0.105,
