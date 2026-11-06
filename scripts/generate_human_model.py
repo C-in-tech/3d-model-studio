@@ -183,10 +183,11 @@ class MeshBuilder:
                 ref = centers[a // theta_res]
             else:
                 # cap: point away from the neighbouring ring
+                if n_rings < 2:
+                    fixed.append((a, b, c))
+                    continue
                 is_start = cap_start and ti - n_side < theta_res
                 ref = centers[1] if is_start else centers[n_rings - 2]
-                if n_rings < 2:
-                    ref = face - (1.0, 0, 0)
             if np.dot(nrm, face - ref) < 0:
                 b, c = c, b
             fixed.append((a, b, c))
