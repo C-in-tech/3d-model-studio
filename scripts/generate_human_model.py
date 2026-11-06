@@ -438,7 +438,7 @@ def write_glb(path, positions, normals, colors, indices, joints, weights,
     # indices
     iv = add_view(indices.astype("<u4").tobytes(), 34963)
     accessors.append({
-        "bufferView": iv, "componentType": 5125, "count": len(indices),
+        "bufferView": iv, "componentType": 5125, "count": int(indices.size),
         "type": "SCALAR", "min": [int(indices.min())], "max": [int(indices.max())],
     })
     idx_acc = len(accessors) - 1
