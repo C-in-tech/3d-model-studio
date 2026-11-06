@@ -1,4 +1,4 @@
-import { useMemo, useRef, useSyncExternalStore, useState } from "react";
+import { useEffect, useMemo, useRef, useSyncExternalStore, useState } from "react";
 import * as THREE from "three";
 import { Canvas, useFrame } from "@react-three/fiber";
 import {
@@ -101,9 +101,10 @@ function RigHelpers({ bones }: { bones: THREE.Bone[] }) {
     const attr = geo?.getAttribute("position") as THREE.BufferAttribute | undefined;
     if (attr) {
       for (let i = 1; i < bones.length; i++) {
-        bones[i].getWorldPosition(tmp);
+        const b = bones[i]!;
+        b.getWorldPosition(tmp);
         attr.setXYZ((i - 1) * 2, tmp.x, tmp.y, tmp.z);
-        bones[i].parent?.getWorldPosition(tmp);
+        b.parent?.getWorldPosition(tmp);
         attr.setXYZ((i - 1) * 2 + 1, tmp.x, tmp.y, tmp.z);
       }
       attr.needsUpdate = true;
