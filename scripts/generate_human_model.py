@@ -171,7 +171,27 @@ class MeshBuilder:
             ring0 = (n_rings - 1) * theta_res
             for j in range(theta_res):
                 extra_tris.append((apex, ring0 + (j + 1) % theta_res, ring0 + j))
-        return self._add(verts + extra_verts, tris + extra_tris, color)
+        all_verts = np.array(verts + extra_verts, dtype=np.float64)
+        centers = [ring_center(r) for r in range(n_rings)]
+        n_side = len(tris)
+        fixed = []
+        for ti, (a, b, c) in enumerate(tris + extra_tris):
+            pa, pb, pc = all_verts[a], all_verts[b], all_verts[c]
+            nrm = np.cross(pb - pa, pc - pa)
+            face = (pa + pb + pc) / 3.0
+            if ti < n_side:
+                ref = centers[a // theta_res]
+            else:
+                # cap: point away from the neighbouring ring
+                if n_rings < 2:
+                    fixed.append((a, b, c))
+                    continue
+                is_start = cap_start and ti - n_side < theta_res
+                ref = centers[1] if is_start else centers[n_rings - 2]
+            if np.dot(nrm, face - ref) < 0:
+                b, c = c, b
+            fixed.append((a, b, c))
+        return self._add(verts + extra_verts, fixed, color)
 
     def sphere(self, center, radius, color, seg=14, rings=10, squash=1.0):
         verts = []
@@ -418,7 +438,7 @@ def write_glb(path, positions, normals, colors, indices, joints, weights,
     # indices
     iv = add_view(indices.astype("<u4").tobytes(), 34963)
     accessors.append({
-        "bufferView": iv, "componentType": 5125, "count": len(indices),
+        "bufferView": iv, "componentType": 5125, "count": int(indices.size),
         "type": "SCALAR", "min": [int(indices.min())], "max": [int(indices.max())],
     })
     idx_acc = len(accessors) - 1
@@ -447,7 +467,8 @@ def write_glb(path, positions, normals, colors, indices, joints, weights,
     accessors.append({"bufferView": wv, "componentType": 5126, "count": len(weights), "type": "VEC4"})
     wgt_acc = len(accessors) - 1
     # inverse bind matrices
-    ibm_flat = np.concatenate([m.reshape(-1) for m in ibms]).astype("<f4")
+    # glTF matrices are column-major
+    ibm_flat = np.concatenate([m.T.reshape(-1) for m in ibms]).astype("<f4")
     ibv = add_view(ibm_flat.tobytes())
     accessors.append({"bufferView": ibv, "componentType": 5126, "count": len(ibms), "type": "MAT4"})
     ibm_acc = len(accessors) - 1
@@ -456,11 +477,13 @@ def write_glb(path, positions, normals, colors, indices, joints, weights,
     nodes = []
     name_to_node = {}
     joint_order = [n for n, _, _ in bone_defs]
+    world_pos = {n: np.array(p) for n, _, p in bone_defs}
     for name, parent, pos in bone_defs:
         node_idx = len(nodes)
+        local = np.array(pos) - (world_pos[parent] if parent else 0.0)
         nodes.append({
             "name": name,
-            "translation": [float(c) for c in pos],
+            "translation": [float(c) for c in local],
             "rotation": [0, 0, 0, 1],
         })
         name_to_node[name] = node_idx
@@ -541,10 +564,8 @@ def main():
     world = {}
     ibms = []
     for name, parent, pos in bone_defs:
-        M = world[parent].copy() if parent else np.eye(4)
-        T = np.eye(4)
-        T[:3, 3] = pos
-        M = M @ T
+        M = np.eye(4)
+        M[:3, 3] = pos  # rest pose has identity rotations: world = translation
         world[name] = M
         ibms.append(np.linalg.inv(M))
 

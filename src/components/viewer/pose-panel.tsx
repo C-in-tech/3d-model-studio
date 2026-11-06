@@ -60,7 +60,7 @@ export function PosePanel() {
             Rig Console
           </h2>
           <button
-            onClick={() => applyPreset(PRESETS[0])}
+            onClick={() => applyPreset(PRESETS[0]!)}
             className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
           >
             Reset

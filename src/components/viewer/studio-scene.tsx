@@ -1,4 +1,4 @@
-import { useMemo, useRef, useSyncExternalStore, useState } from "react";
+import { useEffect, useMemo, useRef, useSyncExternalStore, useState } from "react";
 import * as THREE from "three";
 import { Canvas, useFrame } from "@react-three/fiber";
 import {
@@ -101,9 +101,10 @@ function RigHelpers({ bones }: { bones: THREE.Bone[] }) {
     const attr = geo?.getAttribute("position") as THREE.BufferAttribute | undefined;
     if (attr) {
       for (let i = 1; i < bones.length; i++) {
-        bones[i].getWorldPosition(tmp);
+        const b = bones[i]!;
+        b.getWorldPosition(tmp);
         attr.setXYZ((i - 1) * 2, tmp.x, tmp.y, tmp.z);
-        bones[i].parent?.getWorldPosition(tmp);
+        b.parent?.getWorldPosition(tmp);
         attr.setXYZ((i - 1) * 2 + 1, tmp.x, tmp.y, tmp.z);
       }
       attr.needsUpdate = true;
@@ -161,7 +162,7 @@ export function StudioScene() {
       shadows
       dpr={[1, 2]}
       gl={{ antialias: true }}
-      camera={{ position: [1.5, 1.25, 2.7], fov: 34 }}
+      camera={{ position: [2.2, 1.5, 3.6], fov: 34 }}
     >
       <color attach="background" args={[BACKDROP]} />
       <fog attach="fog" args={[BACKDROP, 7, 16]} />
