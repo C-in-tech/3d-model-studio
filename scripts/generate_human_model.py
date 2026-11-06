@@ -447,7 +447,8 @@ def write_glb(path, positions, normals, colors, indices, joints, weights,
     accessors.append({"bufferView": wv, "componentType": 5126, "count": len(weights), "type": "VEC4"})
     wgt_acc = len(accessors) - 1
     # inverse bind matrices
-    ibm_flat = np.concatenate([m.reshape(-1) for m in ibms]).astype("<f4")
+    # glTF matrices are column-major
+    ibm_flat = np.concatenate([m.T.reshape(-1) for m in ibms]).astype("<f4")
     ibv = add_view(ibm_flat.tobytes())
     accessors.append({"bufferView": ibv, "componentType": 5126, "count": len(ibms), "type": "MAT4"})
     ibm_acc = len(accessors) - 1
