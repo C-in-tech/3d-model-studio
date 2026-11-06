@@ -457,11 +457,13 @@ def write_glb(path, positions, normals, colors, indices, joints, weights,
     nodes = []
     name_to_node = {}
     joint_order = [n for n, _, _ in bone_defs]
+    world_pos = {n: np.array(p) for n, _, p in bone_defs}
     for name, parent, pos in bone_defs:
         node_idx = len(nodes)
+        local = np.array(pos) - (world_pos[parent] if parent else 0.0)
         nodes.append({
             "name": name,
-            "translation": [float(c) for c in pos],
+            "translation": [float(c) for c in local],
             "rotation": [0, 0, 0, 1],
         })
         name_to_node[name] = node_idx
@@ -542,10 +544,8 @@ def main():
     world = {}
     ibms = []
     for name, parent, pos in bone_defs:
-        M = world[parent].copy() if parent else np.eye(4)
-        T = np.eye(4)
-        T[:3, 3] = pos
-        M = M @ T
+        M = np.eye(4)
+        M[:3, 3] = pos  # rest pose has identity rotations: world = translation
         world[name] = M
         ibms.append(np.linalg.inv(M))
 
