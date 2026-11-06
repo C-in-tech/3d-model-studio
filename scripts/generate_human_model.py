@@ -171,7 +171,26 @@ class MeshBuilder:
             ring0 = (n_rings - 1) * theta_res
             for j in range(theta_res):
                 extra_tris.append((apex, ring0 + (j + 1) % theta_res, ring0 + j))
-        return self._add(verts + extra_verts, tris + extra_tris, color)
+        all_verts = np.array(verts + extra_verts, dtype=np.float64)
+        centers = [ring_center(r) for r in range(n_rings)]
+        n_side = len(tris)
+        fixed = []
+        for ti, (a, b, c) in enumerate(tris + extra_tris):
+            pa, pb, pc = all_verts[a], all_verts[b], all_verts[c]
+            nrm = np.cross(pb - pa, pc - pa)
+            face = (pa + pb + pc) / 3.0
+            if ti < n_side:
+                ref = centers[a // theta_res]
+            else:
+                # cap: point away from the neighbouring ring
+                is_start = cap_start and ti - n_side < theta_res
+                ref = centers[1] if is_start else centers[n_rings - 2]
+                if n_rings < 2:
+                    ref = face - (1.0, 0, 0)
+            if np.dot(nrm, face - ref) < 0:
+                b, c = c, b
+            fixed.append((a, b, c))
+        return self._add(verts + extra_verts, fixed, color)
 
     def sphere(self, center, radius, color, seg=14, rings=10, squash=1.0):
         verts = []

@@ -162,7 +162,7 @@ export function StudioScene() {
       shadows
       dpr={[1, 2]}
       gl={{ antialias: true }}
-      camera={{ position: [1.5, 1.25, 2.7], fov: 34 }}
+      camera={{ position: [2.2, 1.5, 3.6], fov: 34 }}
     >
       <color attach="background" args={[BACKDROP]} />
       <fog attach="fog" args={[BACKDROP, 7, 16]} />
