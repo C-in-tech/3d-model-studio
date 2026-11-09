@@ -53,6 +53,7 @@ function HumanModel({ onBones }: { onBones: (bones: THREE.Bone[]) => void }) {
       }
     });
     onBones(boneList);
+    if (import.meta.env.DEV) (window as unknown as { __human: unknown }).__human = { clone, THREE };
   }, [clone, boneList, onBones]);
 
   useFrame(() => {
