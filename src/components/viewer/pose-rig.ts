@@ -150,7 +150,7 @@ export const CONTROLS: Control[] = [
   {
     id: "lHipSwing", label: "Hip swing", group: "Left Leg",
     min: -100, max: 35, default: 0,
-    targets: [{ bone: `${L}UpLeg`, axis: "x", sign: -1 }],
+    targets: [{ bone: `${L}UpLeg`, axis: "x", sign: 1 }],
   },
   {
     id: "lHipSide", label: "Hip spread", group: "Left Leg",
@@ -171,7 +171,7 @@ export const CONTROLS: Control[] = [
   {
     id: "rHipSwing", label: "Hip swing", group: "Right Leg",
     min: -100, max: 35, default: 0,
-    targets: [{ bone: `${R}UpLeg`, axis: "x", sign: -1 }],
+    targets: [{ bone: `${R}UpLeg`, axis: "x", sign: 1 }],
   },
   {
     id: "rHipSide", label: "Hip spread", group: "Right Leg",

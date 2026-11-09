@@ -545,7 +545,7 @@ def write_glb(path, positions, normals, colors, indices, joints, weights,
         f.write(json_bytes)
         f.write(struct.pack("<II", len(buffer_bytes), 0x004E4942))
         f.write(buffer_bytes)
-    print(f"wrote {path}: {len(positions)} verts, {len(indices) // 3} tris, "
+    print(f"wrote {path}: {len(positions)} verts, {len(indices)} tris, "
           f"{len(bone_defs)} bones, {total // 1024} KB")
 
 
