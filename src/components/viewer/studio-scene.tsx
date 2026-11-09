@@ -37,7 +37,8 @@ function HumanModel({ onBones }: { onBones: (bones: THREE.Bone[]) => void }) {
   }, [clone]);
   const bonesByName = useMemo(() => {
     const map = new Map<string, THREE.Bone>();
-    for (const b of boneList) map.set(b.name, b);
+    // GLTFLoader sanitizes names ("mixamorig:Hips" -> "mixamorigHips")
+    for (const b of boneList) map.set(b.name.replace(/[:\[\]./]/g, ""), b);
     return map;
   }, [boneList]);
   const applied = useRef(false);
@@ -57,7 +58,7 @@ function HumanModel({ onBones }: { onBones: (bones: THREE.Bone[]) => void }) {
   useFrame(() => {
     const pose = getPose();
     for (const [name, contribs] of boneMap) {
-      const bone = bonesByName.get(name);
+      const bone = bonesByName.get(name.replace(/[:\[\]./]/g, ""));
       if (!bone) continue;
       let x = 0;
       let y = 0;
