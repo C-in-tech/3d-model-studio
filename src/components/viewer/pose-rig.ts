@@ -146,6 +146,25 @@ export const CONTROLS: Control[] = [
     min: -90, max: 90, default: 0,
     targets: [{ bone: `${R}Hand`, axis: "x", sign: -1 }],
   },
+  // --- Independent finger curls ---
+  ...([
+    ["Thumb", "Thumb curl"],
+    ["Index", "Index curl"],
+    ["Middle", "Middle curl"],
+    ["Ring", "Ring curl"],
+    ["Pinky", "Pinky curl"],
+  ] as const).flatMap(([finger, label]) => ([
+    {
+      id: `l${finger}Curl`, label, group: "Left Hand",
+      min: 0, max: 90, default: 0,
+      targets: [1, 2, 3].map((joint) => ({ bone: `${L}Hand${finger}${joint}`, axis: "z" as const, sign: -1 as const })),
+    },
+    {
+      id: `r${finger}Curl`, label, group: "Right Hand",
+      min: 0, max: 90, default: 0,
+      targets: [1, 2, 3].map((joint) => ({ bone: `${R}Hand${finger}${joint}`, axis: "z" as const, sign: 1 as const })),
+    },
+  ])),
   // --- Left leg ---
   {
     id: "lHipSwing", label: "Hip swing", group: "Left Leg",
