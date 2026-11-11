@@ -157,12 +157,12 @@ export const CONTROLS: Control[] = [
     {
       id: `l${finger}Curl`, label, group: "Left Hand",
       min: 0, max: 90, default: 0,
-      targets: [1, 2, 3].map((joint) => ({ bone: `${L}Hand${finger}${joint}`, axis: "z" as const, sign: -1 as const })),
+      targets: [1, 2, 3].map((joint) => ({ bone: `${L}Hand${finger}${joint}`, axis: "y" as const, sign: -1 as const })),
     },
     {
       id: `r${finger}Curl`, label, group: "Right Hand",
       min: 0, max: 90, default: 0,
-      targets: [1, 2, 3].map((joint) => ({ bone: `${R}Hand${finger}${joint}`, axis: "z" as const, sign: 1 as const })),
+      targets: [1, 2, 3].map((joint) => ({ bone: `${R}Hand${finger}${joint}`, axis: "y" as const, sign: 1 as const })),
     },
   ])),
   // --- Left leg ---
